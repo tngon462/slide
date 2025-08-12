@@ -1,0 +1,227 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Slides Manager</title>
+  <style>
+    :root{--gap:12px}
+    body{font-family:system-ui,Arial;padding:24px;max-width:1000px;margin:auto}
+    h1{margin:0 0 16px}
+    .section{margin:24px 0}
+    .card{border:1px solid #ddd;border-radius:12px;padding:16px}
+    .row{display:flex;gap:var(--gap);align-items:center;flex-wrap:wrap}
+    .muted{color:#666}
+    button{padding:10px 16px;border:0;border-radius:10px;cursor:pointer}
+    input,button{font-size:15px}
+    .btn-primary{background:#111;color:#fff}
+    .btn-ghost{background:#f3f3f3}
+    .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:var(--gap)}
+    .thumb{border:1px solid #ccc;border-radius:10px;padding:8px;display:flex;flex-direction:column;gap:8px;background:#fafafa}
+    .thumb img{width:100%;height:120px;object-fit:cover;border-radius:6px}
+    .thumb .meta{display:flex;gap:8px;align-items:center}
+    .thumb input[type="number"]{width:70px}
+    .thumb .del{margin-left:auto}
+    .ok{color:#0a9a00}.err{color:#b00020}
+    .list{list-style:none;margin:0;padding:0}
+    .item{display:flex;align-items:center;gap:10px;padding:8px;border:1px solid #e5e5e5;border-radius:10px;margin-bottom:8px;background:#fff}
+    .handle{cursor:grab;font-size:18px}
+    .src{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+    .item img{width:60px;height:40px;object-fit:cover;border-radius:6px;border:1px solid #ddd}
+    .right{display:flex;gap:8px;align-items:center}
+    .inline-input{width:70px}
+    .divider{height:1px;background:#eee;margin:16px 0}
+    .hint{font-size:13px;color:#666}
+    .toggle{display:flex;align-items:center;gap:8px}
+  </style>
+</head>
+<body>
+  <h1>Quản lý slides (slides/ & manifest.json)</h1>
+
+  <!-- UPLOAD -->
+  <div class="section card">
+    <h2 style="margin-top:0">1) Thêm ảnh mới</h2>
+    <div class="row">
+      <input id="files" type="file" accept="image/*" multiple />
+      <label>Duration mặc định (giây): <input type="number" id="defaultDuration" value="8" min="1"></label>
+      <button class="btn-primary" id="btnUpload">Upload & Append</button>
+      <span id="msgUp" class="muted"></span>
+    </div>
+    <div class="hint">Chọn nhiều ảnh một lúc. Có thể sửa duration/alt từng ảnh ngay dưới.</div>
+    <div class="grid" id="preview"></div>
+  </div>
+
+  <!-- MANIFEST -->
+  <div class="section card">
+    <h2 style="margin-top:0">2) Manifest hiện tại</h2>
+    <div class="row">
+      <button class="btn-ghost" id="btnReload">Tải lại</button>
+      <button class="btn-primary" id="btnSave">Lưu manifest</button>
+      <label class="toggle">
+        <input type="checkbox" id="deleteFilesToggle" />
+        Khi xóa khỏi manifest, **xóa cả file** trong repo
+      </label>
+      <span id="msgMf" class="muted"></span>
+    </div>
+    <div class="divider"></div>
+    <ul id="manifestList" class="list"></ul>
+    <div class="hint">Mẹo: Kéo-thả bằng biểu tượng ☰ để đổi thứ tự. Có thể sửa duration/alt trực tiếp.</div>
+  </div>
+
+<script>
+  const $ = s => document.querySelector(s);
+  const $$ = s => Array.from(document.querySelectorAll(s));
+
+  // ==== PREVIEW UPLOAD PANEL ====
+  const filesInput = $('#files');
+  const preview = $('#preview');
+  const msgUp = $('#msgUp');
+
+  function clearPreview(){ preview.innerHTML = ''; }
+  filesInput.addEventListener('change', () => {
+    clearPreview();
+    const defDur = +$('#defaultDuration').value || 8;
+    for (const file of filesInput.files) {
+      const url = URL.createObjectURL(file);
+      const div = document.createElement('div');
+      div.className = 'thumb';
+      div.innerHTML = `
+        <img src="${url}" alt="">
+        <div class="meta">
+          <label>Dur <input type="number" value="${defDur}" min="1" class="dur"></label>
+          <input type="text" class="alt" placeholder="alt (tuỳ chọn)" />
+          <button class="del">Xóa</button>
+        </div>
+      `;
+      div.querySelector('.del').onclick = () => {
+        // remove this file from FileList (rebuild)
+        const arr = Array.from(filesInput.files).filter(f => f !== file);
+        const dt = new DataTransfer();
+        arr.forEach(f => dt.items.add(f));
+        filesInput.files = dt.files;
+        div.remove();
+      };
+      preview.appendChild(div);
+    }
+  });
+
+  $('#btnUpload').onclick = async () => {
+    msgUp.textContent = '';
+    const files = filesInput.files;
+    if (!files || files.length === 0) { msgUp.textContent = 'Chưa chọn ảnh'; msgUp.className='err'; return; }
+
+    const fd = new FormData();
+    const thumbs = Array.from(preview.children);
+    Array.from(files).forEach((f, i) => fd.append('images', f));
+    thumbs.forEach(t => fd.append('durations', t.querySelector('.dur').value || '8'));
+    thumbs.forEach(t => fd.append('alts', t.querySelector('.alt').value || ''));
+
+    try{
+      const res = await fetch('/api/add-slides', { method:'POST', body: fd });
+      const data = await res.json();
+      if(!res.ok) throw new Error(data.error || res.statusText);
+      msgUp.textContent = `✔ Đã thêm ${data.added} ảnh (commit ${data.commitSha.slice(0,7)})`;
+      msgUp.className = 'ok';
+      // reset
+      filesInput.value = '';
+      clearPreview();
+      await loadManifest(); // refresh danh sách
+    }catch(e){
+      msgUp.textContent = '✖ ' + e.message;
+      msgUp.className = 'err';
+    }
+  };
+
+  // ==== MANIFEST LIST ====
+  const list = $('#manifestList');
+  const msgMf = $('#msgMf');
+
+  function renderManifest(items){
+    list.innerHTML = '';
+    items.forEach((it, idx) => {
+      const li = document.createElement('li');
+      li.className = 'item';
+      li.draggable = true;
+      li.dataset.index = idx;
+      li.innerHTML = `
+        <span class="handle" title="Kéo để sắp xếp">☰</span>
+        <img src="${it.src}" alt="">
+        <div class="src" title="${it.src}">${it.src}</div>
+        <div class="right">
+          <label>Dur <input class="inline-input dur" type="number" min="1" value="${it.duration ?? ''}" placeholder="-"></label>
+          <input class="inline-input alt" type="text" value="${it.alt ?? ''}" placeholder="alt">
+          <button class="btn-ghost del">Xóa</button>
+        </div>
+      `;
+      li.querySelector('.del').onclick = () => { li.remove(); };
+      // Drag & drop
+      li.addEventListener('dragstart', ev => {
+        ev.dataTransfer.setData('text/plain', li.dataset.index);
+        li.classList.add('dragging');
+      });
+      li.addEventListener('dragend', () => {
+        $$('li.item').forEach(x => x.classList.remove('dragging'));
+        // reindex
+        $$('.item').forEach((el,i)=> el.dataset.index = i);
+      });
+      li.addEventListener('dragover', ev => {
+        ev.preventDefault();
+        const dragging = $('.item.dragging');
+        if (!dragging || dragging === li) return;
+        const rect = li.getBoundingClientRect();
+        const before = (ev.clientY - rect.top) < (rect.height / 2);
+        list.insertBefore(dragging, before ? li : li.nextSibling);
+      });
+      list.appendChild(li);
+    });
+  }
+
+  async function loadManifest(){
+    msgMf.textContent = 'Đang tải manifest...';
+    msgMf.className='muted';
+    const res = await fetch('/api/manifest');
+    const data = await res.json();
+    if (!res.ok) { msgMf.textContent = '✖ '+(data.error||res.statusText); msgMf.className='err'; return; }
+    window.__manifestOriginal = data.items; // normalized array [{src,duration,alt}]
+    renderManifest(structuredClone(window.__manifestOriginal));
+    msgMf.textContent = `Đã tải ${data.items.length} mục`;
+    msgMf.className='muted';
+  }
+
+  $('#btnReload').onclick = loadManifest;
+
+  $('#btnSave').onclick = async () => {
+    // Collect list (the current DOM order)
+    const items = $$('.item').map(li => {
+      const src = li.querySelector('.src').getAttribute('title') || li.querySelector('.src').textContent.trim();
+      const durVal = li.querySelector('.dur').value.trim();
+      const altVal = li.querySelector('.alt').value.trim();
+      const obj = { src };
+      if (durVal) obj.duration = +durVal;
+      if (altVal) obj.alt = altVal;
+      return obj;
+    });
+    const deleteFiles = $('#deleteFilesToggle').checked;
+
+    try{
+      msgMf.textContent = 'Đang lưu...'; msgMf.className='muted';
+      const res = await fetch('/api/manifest', {
+        method:'PUT',
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({ items, delete_files: deleteFiles })
+      });
+      const data = await res.json();
+      if(!res.ok) throw new Error(data.error || res.statusText);
+      msgMf.textContent = `✔ Đã lưu (commit ${data.commitSha.slice(0,7)}). Xóa ${data.removed} mục khỏi manifest${deleteFiles?`, xóa ${data.deletedFiles} file trên repo`:''}.`;
+      msgMf.className='ok';
+      window.__manifestOriginal = items;
+    }catch(e){
+      msgMf.textContent = '✖ '+e.message; msgMf.className='err';
+    }
+  };
+
+  // init
+  loadManifest();
+</script>
+</body>
+</html>
