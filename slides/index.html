@@ -26,19 +26,16 @@
     .right{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
     .pill{background:#f6f6f6;border:1px solid #e7e7e7;border-radius:99px;padding:6px 10px}
     .ok{color:#0a9a00}.err{color:#b00020}
-    .divider{height:1px;background:#eee;margin:12px 0}
-    .hint{font-size:12px;color:#666}
   </style>
 </head>
 <body>
   <div class="topbar">
     <div class="left">
-      <h1>Quản lý thư mục <code>slides/</code></h1>
+      <h1>Quản lý <code>slides/</code></h1>
       <span id="count" class="pill muted">0 ảnh</span>
     </div>
     <div class="right">
       <button id="btnRefresh" class="btn">↻ Tải lại</button>
-      <button id="btnRebuild" class="btn">🛠 Rebuild manifest</button>
       <span id="msgTop" class="muted"></span>
     </div>
   </div>
@@ -49,7 +46,9 @@
       <button id="btnUpload" class="btn primary">⬆️ Tải ảnh lên</button>
       <span id="msgUp" class="muted"></span>
     </div>
-    <div class="hint">Tên file sẽ được giữ nguyên (được làm sạch ký tự). Nếu trùng sẽ tự thêm hậu tố <code>-1</code>, <code>-2</code>…</div>
+    <div class="muted" style="font-size:13px">
+      Tên file giữ nguyên (được làm sạch ký tự). Nếu trùng sẽ tự thêm hậu tố <code>-1</code>, <code>-2</code> …
+    </div>
   </div>
 
   <div id="list" class="grid"></div>
@@ -86,11 +85,16 @@
 
   async function load() {
     msgTop.textContent = 'Đang tải...';
-    const data = await api('/api/files');
-    listEl.innerHTML = data.items.map(tileTemplate).join('');
-    countEl.textContent = `${data.items.length} ảnh`;
-    msgTop.textContent = '';
-    bindTileEvents();
+    try{
+      const data = await api('/api/files');
+      listEl.innerHTML = data.items.map(tileTemplate).join('');
+      countEl.textContent = `${data.items.length} ảnh`;
+      msgTop.textContent = '';
+      bindTileEvents();
+    }catch(e){
+      msgTop.textContent = '✖ ' + e.message;
+      msgTop.className = 'err';
+    }
   }
 
   function bindTileEvents(){
@@ -109,7 +113,7 @@
             headers:{'Content-Type':'application/json'},
             body: JSON.stringify({ path })
           });
-          msgTop.textContent = `✔ Đã xóa ${res.removed} file. Manifest cập nhật: ${res.manifestCount} mục`;
+          msgTop.textContent = `✔ Đã xóa. Manifest hiện ${res.manifestCount} mục`;
           msgTop.className='ok';
           await load();
         }catch(e){
@@ -129,7 +133,7 @@
             headers:{'Content-Type':'application/json'},
             body: JSON.stringify({ old_path: path, new_name: newName })
           });
-          msgTop.textContent = `✔ Đã đổi tên. Manifest cập nhật: ${res.manifestCount} mục`;
+          msgTop.textContent = `✔ Đã đổi tên. Manifest hiện ${res.manifestCount} mục`;
           msgTop.className='ok';
           await load();
         }catch(e){
@@ -159,16 +163,6 @@
   };
 
   $('#btnRefresh').onclick = load;
-
-  $('#btnRebuild').onclick = async () => {
-    try{
-      const res = await api('/api/manifest', { method:'POST' });
-      msgTop.textContent = `✔ Rebuild manifest xong: ${res.manifestCount} mục`;
-      msgTop.className='ok';
-    }catch(e){
-      alert(e.message);
-    }
-  };
 
   load();
 </script>
