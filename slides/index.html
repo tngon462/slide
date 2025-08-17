@@ -1,88 +1,157 @@
-.right{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
-.pill{background:#f6f6f6;border:1px solid #e7e7e7;border-radius:99px;padding:6px 10px}
-.ok{color:#0a9a00}.err{color:#b00020}
-    .divider{height:1px;background:#eee;margin:12px 0}
-    .hint{font-size:12px;color:#666}
-</style>
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>T-NGON Kiosk</title>
+  <style>
+    :root {
+      --bg: #0b0b0c; --fg: #fafafa; --muted: #8b8b91; --accent: #22c55e;
+    }
+    html, body { height: 100%; margin: 0; background: var(--bg); color: var(--fg); font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Apple Color Emoji", "Segoe UI Emoji"; }
+    .wrap { display: grid; place-items: center; height: 100%; padding: 24px; }
+    .card { width: min(960px, 92vw); text-align: center; background: #141417; border: 1px solid #23232a; border-radius: 20px; padding: 28px; box-shadow: 0 10px 40px rgba(0,0,0,.35); }
+    h1 { font-size: clamp(24px, 4vw, 42px); margin: 4px 0 12px; }
+    p  { font-size: clamp(14px, 2.5vw, 18px); color: var(--muted); }
+    .btn { margin-top: 18px; font-size: clamp(16px, 3vw, 22px); background: var(--accent); color: #062a11; border: 0; border-radius: 14px; padding: 14px 22px; font-weight: 700; cursor: pointer; }
+    .btn:active { transform: translateY(1px); }
+
+    /* IFRAME khu gọi món */
+    #orderFrame { position: fixed; inset: 0; width: 100%; height: 100%; border: 0; display: none; background: #000; }
+
+    /* OVERLAY slideshow */
+    #slideshow { position: fixed; inset: 0; display: none; background: #000; z-index: 9999; }
+    #slideshow.show { display: block; }
+    #slideImg { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+    .slideCaption { position: absolute; left: 0; right: 0; bottom: 24px; text-align: center; font-size: clamp(16px, 2.8vw, 28px); color: #fff; text-shadow: 0 2px 20px rgba(0,0,0,.8); }
+
+    /* Nút tắt overlay */
+    #tapToClose { position: absolute; top: 16px; right: 16px; background: rgba(255,255,255,.15); color: #fff; border: 0; padding: 10px 14px; border-radius: 10px; font-size: 16px; }
+
+    /* Ẩn splash khi đã mở gọi món */
+    .hidden { display: none !important; }
+  </style>
 </head>
 <body>
-<div class="topbar">
-<div class="left">
-      <h1>Quản lý thư mục <code>slides/</code></h1>
-      <h1>Quản lý <code>slides/</code></h1>
-<span id="count" class="pill muted">0 ảnh</span>
-</div>
-<div class="right">
-<button id="btnRefresh" class="btn">↻ Tải lại</button>
-      <button id="btnRebuild" class="btn">🛠 Rebuild manifest</button>
-<span id="msgTop" class="muted"></span>
-</div>
-</div>
-@@ -49,7 +46,9 @@ <h1>Quản lý thư mục <code>slides/</code></h1>
-<button id="btnUpload" class="btn primary">⬆️ Tải ảnh lên</button>
-<span id="msgUp" class="muted"></span>
-</div>
-    <div class="hint">Tên file sẽ được giữ nguyên (được làm sạch ký tự). Nếu trùng sẽ tự thêm hậu tố <code>-1</code>, <code>-2</code>…</div>
-    <div class="muted" style="font-size:13px">
-      Tên file giữ nguyên (được làm sạch ký tự). Nếu trùng sẽ tự thêm hậu tố <code>-1</code>, <code>-2</code> …
+  <!-- MÀN BẮT ĐẦU -->
+  <div id="splash" class="wrap">
+    <div class="card">
+      <h1>T‑NGON Menu</h1>
+      <p>Chạm "Bắt đầu gọi món" để vào menu. Nếu không thao tác, màn hình sẽ tự phát slideshow sau 1 phút.</p>
+      <button id="startBtn" class="btn">Bắt đầu gọi món</button>
     </div>
-</div>
+  </div>
 
-<div id="list" class="grid"></div>
-@@ -86,11 +85,16 @@ <h1>Quản lý thư mục <code>slides/</code></h1>
+  <!-- IFRAME chứa trang gọi món (KHÔNG rời index.html) -->
+  <iframe id="orderFrame" title="Order"></iframe>
 
-async function load() {
-msgTop.textContent = 'Đang tải...';
-    const data = await api('/api/files');
-    listEl.innerHTML = data.items.map(tileTemplate).join('');
-    countEl.textContent = `${data.items.length} ảnh`;
-    msgTop.textContent = '';
-    bindTileEvents();
-    try{
-      const data = await api('/api/files');
-      listEl.innerHTML = data.items.map(tileTemplate).join('');
-      countEl.textContent = `${data.items.length} ảnh`;
-      msgTop.textContent = '';
-      bindTileEvents();
-    }catch(e){
-      msgTop.textContent = '✖ ' + e.message;
-      msgTop.className = 'err';
+  <!-- OVERLAY SLIDESHOW (luôn ở trên) -->
+  <div id="slideshow" aria-hidden="true">
+    <img id="slideImg" alt="Slideshow" />
+    <div class="slideCaption" id="slideCaption"></div>
+    <button id="tapToClose">Chạm để tiếp tục</button>
+  </div>
+
+  <script>
+    // ===== CONFIG =====
+    const ORDER_URL = "https://order.atpos.net/order/public/checking"; // <-- ĐẶT LINK GỌI MÓN THỰC TẾ Ở ĐÂY
+
+    // Slideshow: mỗi item: { src, caption?, duration? (ms) }
+    const SLIDES = [
+      { src: "https://raw.githubusercontent.com/tngon462/slide/main/slides/Sting.jpg", caption: "Khuyến mãi hôm nay" },
+      { src: "https://raw.githubusercontent.com/tngon462/slide/main/slides/set_pho_tai_2-removebg-preview.png", caption: "Phở ngon mỗi ngày" },
+    ];
+
+    // Thời gian không thao tác để bật slideshow (ms)
+    const IDLE_MS = 60_000; // 1 phút
+
+    // ===== STATE =====
+    const splash = document.getElementById('splash');
+    const startBtn = document.getElementById('startBtn');
+    const frame = document.getElementById('orderFrame');
+    const overlay = document.getElementById('slideshow');
+    const slideImg = document.getElementById('slideImg');
+    const slideCaption = document.getElementById('slideCaption');
+    const tapToClose = document.getElementById('tapToClose');
+
+    let idleTimer = null;
+    let slideTimer = null;
+    let slideIndex = 0;
+
+    // ===== HELPERS =====
+    function preloadSlides() {
+      SLIDES.forEach(s => { const i = new Image(); i.src = s.src; });
     }
-}
 
-function bindTileEvents(){
-@@ -109,7 +113,7 @@ <h1>Quản lý thư mục <code>slides/</code></h1>
-headers:{'Content-Type':'application/json'},
-body: JSON.stringify({ path })
-});
-          msgTop.textContent = `✔ Đã xóa ${res.removed} file. Manifest cập nhật: ${res.manifestCount} mục`;
-          msgTop.textContent = `✔ Đã xóa. Manifest hiện ${res.manifestCount} mục`;
-msgTop.className='ok';
-await load();
-}catch(e){
-@@ -129,7 +133,7 @@ <h1>Quản lý thư mục <code>slides/</code></h1>
-headers:{'Content-Type':'application/json'},
-body: JSON.stringify({ old_path: path, new_name: newName })
-});
-          msgTop.textContent = `✔ Đã đổi tên. Manifest cập nhật: ${res.manifestCount} mục`;
-          msgTop.textContent = `✔ Đã đổi tên. Manifest hiện ${res.manifestCount} mục`;
-msgTop.className='ok';
-await load();
-}catch(e){
-@@ -160,16 +164,6 @@ <h1>Quản lý thư mục <code>slides/</code></h1>
-
-$('#btnRefresh').onclick = load;
-
-  $('#btnRebuild').onclick = async () => {
-    try{
-      const res = await api('/api/manifest', { method:'POST' });
-      msgTop.textContent = `✔ Rebuild manifest xong: ${res.manifestCount} mục`;
-      msgTop.className='ok';
-    }catch(e){
-      alert(e.message);
+    function resetIdle() {
+      clearTimeout(idleTimer);
+      idleTimer = setTimeout(showSlideshow, IDLE_MS);
     }
-  };
 
-load();
-</script>
+    function showSlideshow() {
+      overlay.classList.add('show');
+      startSlides();
+    }
+
+    function hideSlideshow() {
+      overlay.classList.remove('show');
+      stopSlides();
+      resetIdle();
+    }
+
+    function startSlides() {
+      stopSlides();
+      showSlide(slideIndex);
+      slideTimer = setInterval(() => {
+        slideIndex = (slideIndex + 1) % SLIDES.length;
+        showSlide(slideIndex);
+      }, getDuration(SLIDES[slideIndex]));
+    }
+
+    function stopSlides() {
+      clearInterval(slideTimer);
+      slideTimer = null;
+    }
+
+    function getDuration(s) { return s?.duration || 5000; }
+
+    function showSlide(i) {
+      const s = SLIDES[i];
+      slideImg.src = s.src;
+      slideCaption.textContent = s.caption || "";
+      // reset interval to respect each slide's duration
+      clearInterval(slideTimer);
+      slideTimer = setInterval(() => {
+        slideIndex = (slideIndex + 1) % SLIDES.length;
+        showSlide(slideIndex);
+      }, getDuration(SLIDES[i]));
+    }
+
+    function enterOrder() {
+      splash.classList.add('hidden');
+      frame.style.display = 'block';
+      // KHÔNG rời index.html → giữ được bộ đếm idle + overlay
+      frame.src = ORDER_URL;
+      resetIdle();
+    }
+
+    // ===== EVENTS =====
+    ['click','touchstart','mousemove','keydown','wheel'].forEach(ev => {
+      window.addEventListener(ev, resetIdle, { passive: true });
+    });
+
+    startBtn.addEventListener('click', enterOrder);
+    overlay.addEventListener('click', hideSlideshow);
+    tapToClose.addEventListener('click', hideSlideshow);
+
+    // Khi quay lại tab, khởi động lại idle
+    document.addEventListener('visibilitychange', () => {
+      if (!document.hidden) resetIdle();
+    });
+
+    // ===== INIT =====
+    preloadSlides();
+    resetIdle(); // cũng chạy được ở màn bắt đầu
+  </script>
 </body>
+</html>
